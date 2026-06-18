@@ -290,6 +290,13 @@ export default function Investments() {
           Update activities
           <input type="file" accept=".csv" style={{display:'none'}} onChange={e=>e.target.files[0]&&handleActivitiesFile(e.target.files[0])} />
         </label>
+        <button
+          style={{...s.btn,display:'inline-flex',alignItems:'center',gap:4}}
+          onClick={handleRefresh}
+          disabled={refreshing||holdings.length===0}
+        >
+          {refreshing?'↻ Refreshing…':'↻ Refresh prices'}
+        </button>
         {uploading&&<span style={s.hint}>Processing…</span>}
         {uploadMsg&&<span style={{fontSize:12,color:'#0F6E56'}}>{uploadMsg}</span>}
         {lastUpdated&&<span style={s.hint}>Holdings as of {new Date(lastUpdated).toLocaleDateString('en-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>}
