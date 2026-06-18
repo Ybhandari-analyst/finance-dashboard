@@ -21,6 +21,7 @@ function detectSource(headers, sampleText) {
   if (h.includes('transfer date') && h.includes('balance')) return 'EQ Bank';
   if (h.includes('foreign spend amount') || h.includes('exchange rate')) return 'Amex';
   if (h.includes('filter') && h.includes('type of transaction')) return 'Scene+ Visa';
+  if (h.includes('transaction_type') && h.includes('merchant')) return 'Wealthsimple CC';
   if ((h.length === 5 && h[0].match(/\d{4}-\d{2}-\d{2}/)) || t.includes('5268')) return 'CIBC Costco';
   return 'Unknown';
 }
@@ -136,6 +137,28 @@ async function parseCSVFile(file) {
         card: 'CIBC Costco MC',
       };
     }).filter(t => t.description && t.amount > 0);
+  }
+
+  if (source === 'Wealthsimple CC') {
+    const dateIdx = headers.findIndex(h => h.includes('transaction_date'));
+    const typeIdx = headers.findIndex(h => h.includes('transaction_type'));
+    const merchantIdx = headers.findIndex(h => h.includes('merchant'));
+    const amtIdx = headers.findIndex(h => h === 'amount');
+    const statusIdx = headers.findIndex(h => h.includes('status'));
+    return dataRows
+      .filter(r => r[typeIdx] === 'Purchase' && r[statusIdx] === 'Completed')
+      .map((r, i) => {
+        const amt = parseAmount(r[amtIdx]);
+        return {
+          id: `ws_cc_${r[dateIdx]}_${i}`,
+          date: r[dateIdx],
+          description: (r[merchantIdx] || '').trim(),
+          amount: Math.abs(amt),
+          is_credit: false,
+          source: 'Wealthsimple CC',
+          card: 'Wealthsimple Credit',
+        };
+      }).filter(t => t.description && t.amount > 0);
   }
 
   // Unknown — best guess
