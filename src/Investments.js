@@ -77,8 +77,40 @@ export default function Investments() {
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [livePrices, setLivePrices] = useState({});
+  const [refreshing, setRefreshing] = useState(false);
+  const [priceUpdatedAt, setPriceUpdatedAt] = useState(null);
 
   useEffect(() => { loadAll(); getUSDCAD().then(r=>setUsdCad(r)); }, []);
+
+  async function fetchLivePrices(holdingsData) {
+    const tickers = [...new Set(holdingsData.map(h => h.symbol).filter(s => s && !s.includes('-') && s.length < 10))];
+    const prices = {};
+    await Promise.all(tickers.map(async ticker => {
+      try {
+        const url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '?interval=1d&range=1d';
+        const r = await fetch('https://corsproxy.io/?url=' + encodeURIComponent(url));
+        const j = await r.json();
+        const price = j?.chart?.result?.[0]?.meta?.regularMarketPrice;
+        if (price) prices[ticker] = price;
+      } catch {}
+    }));
+    return prices;
+  }
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    try {
+      const [newRate, newPrices] = await Promise.all([
+        getUSDCAD(),
+        fetchLivePrices(holdings),
+      ]);
+      setUsdCad(newRate);
+      setLivePrices(newPrices);
+      setPriceUpdatedAt(new Date());
+    } catch (e) { console.error(e); }
+    setRefreshing(false);
+  }
 
   async function loadAll() {
     const [{ data: hData }, { data: aData }] = await Promise.all([
@@ -133,12 +165,23 @@ export default function Investments() {
     setUploading(false);
   }
 
-  // Holdings with CAD conversion
-  const holdingsCAD = holdings.map(h => ({
-    ...h,
-    marketValueCAD: h.market_value_currency === 'USD' ? h.market_value * usdCad : h.market_value,
-    bookValueCAD: h.book_value_cad,
-  }));
+  // Holdings with CAD conversion — use live price if available, else stored value
+  const holdingsCAD = holdings.map(h => {
+    const livePrice = livePrices[h.symbol];
+    const liveMarketValue = livePrice && h.quantity
+      ? livePrice * h.quantity
+      : h.market_value;
+    const marketValueCAD = (h.market_value_currency === 'USD' || h.market_price_currency === 'USD')
+      ? liveMarketValue * usdCad
+      : liveMarketValue;
+    return {
+      ...h,
+      marketValueCAD,
+      bookValueCAD: h.book_value_cad,
+      livePrice,
+      liveMarketValue,
+    };
+  });
 
   const isCrypto = subTab === 'crypto';
   const filteredHoldings = holdingsCAD.filter(h =>
@@ -247,21 +290,10 @@ export default function Investments() {
           Update activities
           <input type="file" accept=".csv" style={{display:'none'}} onChange={e=>e.target.files[0]&&handleActivitiesFile(e.target.files[0])} />
         </label>
-        <button
-          style={{...s.btn, display:'flex', alignItems:'center', gap:4}}
-          onClick={() => {
-            const tickers = [...new Set(holdings.map(h => h.ticker))];
-            fetchPrices(tickers);
-            getUSDCAD().then(r => setUsdCad(r));
-          }}
-          disabled={priceLoading || holdings.length === 0}
-        >
-          {priceLoading ? '↻ Refreshing…' : '↻ Refresh prices'}
-        </button>
         {uploading&&<span style={s.hint}>Processing…</span>}
         {uploadMsg&&<span style={{fontSize:12,color:'#0F6E56'}}>{uploadMsg}</span>}
-        {priceLoading&&<span style={s.hint}>Fetching live prices…</span>}
         {lastUpdated&&<span style={s.hint}>Holdings as of {new Date(lastUpdated).toLocaleDateString('en-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>}
+        {priceUpdatedAt&&<span style={{...s.hint,color:'#0F6E56'}}>Live prices as of {priceUpdatedAt.toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit'})}</span>}
         <span style={s.hint}>USD/CAD: {usdCad.toFixed(4)}</span>
       </div>
 
