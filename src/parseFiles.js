@@ -21,7 +21,7 @@ function detectSource(headers, sampleText) {
   if (h.includes('transfer date') && h.includes('balance')) return 'EQ Bank';
   if (h.includes('foreign spend amount') || h.includes('exchange rate')) return 'Amex';
   if (h.includes('filter') && h.includes('type of transaction')) return 'Scene+ Visa';
-  if (h.length === 5 && h[0].match(/\d{4}-\d{2}-\d{2}/) || t.includes('5268')) return 'CIBC Costco';
+  if ((h.length === 5 && h[0].match(/\d{4}-\d{2}-\d{2}/)) || t.includes('5268')) return 'CIBC Costco';
   return 'Unknown';
 }
 
