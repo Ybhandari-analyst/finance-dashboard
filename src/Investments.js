@@ -247,8 +247,20 @@ export default function Investments() {
           Update activities
           <input type="file" accept=".csv" style={{display:'none'}} onChange={e=>e.target.files[0]&&handleActivitiesFile(e.target.files[0])} />
         </label>
+        <button
+          style={{...s.btn, display:'flex', alignItems:'center', gap:4}}
+          onClick={() => {
+            const tickers = [...new Set(holdings.map(h => h.ticker))];
+            fetchPrices(tickers);
+            getUSDCAD().then(r => setUsdCad(r));
+          }}
+          disabled={priceLoading || holdings.length === 0}
+        >
+          {priceLoading ? '↻ Refreshing…' : '↻ Refresh prices'}
+        </button>
         {uploading&&<span style={s.hint}>Processing…</span>}
         {uploadMsg&&<span style={{fontSize:12,color:'#0F6E56'}}>{uploadMsg}</span>}
+        {priceLoading&&<span style={s.hint}>Fetching live prices…</span>}
         {lastUpdated&&<span style={s.hint}>Holdings as of {new Date(lastUpdated).toLocaleDateString('en-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>}
         <span style={s.hint}>USD/CAD: {usdCad.toFixed(4)}</span>
       </div>
