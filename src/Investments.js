@@ -84,7 +84,9 @@ export default function Investments() {
   useEffect(() => { loadAll(); getUSDCAD().then(r=>setUsdCad(r)); }, []);
 
   async function fetchLivePrices(holdingsData) {
-    const tickers = [...new Set(holdingsData.map(h => h.symbol).filter(s => s && !s.includes('-') && s.length < 10))];
+    // Include all tickers including crypto (BTC-CAD, ETH-CAD work on Yahoo Finance)
+    // Exclude only empty/null symbols
+    const tickers = [...new Set(holdingsData.map(h => h.symbol).filter(s => s && s.length > 0))];
     const prices = {};
     await Promise.all(tickers.map(async ticker => {
       try {
@@ -171,9 +173,10 @@ export default function Investments() {
     const liveMarketValue = livePrice && h.quantity
       ? livePrice * h.quantity
       : h.market_value;
-    const marketValueCAD = (h.market_value_currency === 'USD' || h.market_price_currency === 'USD')
-      ? liveMarketValue * usdCad
-      : liveMarketValue;
+    // Only convert to CAD if the holding is genuinely USD-denominated
+    // Crypto (BTC-CAD, ETH-CAD) already returns CAD prices from Yahoo
+    const isUSD = h.market_value_currency === 'USD' && !h.symbol?.includes('-CAD');
+    const marketValueCAD = isUSD ? liveMarketValue * usdCad : liveMarketValue;
     return {
       ...h,
       marketValueCAD,
