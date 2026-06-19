@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabase';
 import { categorize, CATEGORIES, CAT_COLORS, EXPENSE_CATS } from './categorize';
-import { parseFile } from './parseFiles';
+import { parseFile, detectFileSource } from './parseFiles';
 import './App.css';
 import Investments from './Investments';
 import WiseTab from './Wise';
-import BudgetsTab from './Budgets';
 
 export default function App() {
   const [tab, setTab] = useState('dashboard');
@@ -19,6 +18,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
+  const [uploadPrompt, setUploadPrompt] = useState(null); // { file, source } waiting for user input
   const [insightLoading, setInsightLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -142,23 +142,39 @@ export default function App() {
   const cards = ['All', ...new Set(txWithCats.map(tx => tx.card))].filter(Boolean).sort();
 
   async function handleFiles(files) {
-    setUploading(true); setUploadMsg('');
+    for (const file of files) {
+      const detection = await detectFileSource(file);
+      if (detection.confidence === 'low' || detection.needsCardName) {
+        // Unknown or ambiguous — show prompt
+        setUploadPrompt({ file, source: detection.source });
+        return; // handle one at a time
+      }
+      await uploadSingleFile(file, null);
+    }
+  }
+
+  async function uploadSingleFile(file, cardNameOverride) {
+    setUploading(true);
     const existingIds = new Set(transactions.map(t => t.id));
     let added = 0; let dupes = 0;
-    for (const file of files) {
-      const parsed = await parseFile(file);
-      const newOnes = parsed.filter(tx => !existingIds.has(tx.id));
-      dupes += parsed.length - newOnes.length;
-      if (newOnes.length > 0) {
-        const { error } = await supabase.from('transactions').insert(newOnes);
-        if (!error) { added += newOnes.length; newOnes.forEach(tx => existingIds.add(tx.id)); }
-        else console.error(error);
-      }
+    const parsed = await parseFile(file, cardNameOverride);
+    const newOnes = parsed.filter(tx => !existingIds.has(tx.id));
+    dupes = parsed.length - newOnes.length;
+    if (newOnes.length > 0) {
+      const { error } = await supabase.from('transactions').insert(newOnes);
+      if (!error) added = newOnes.length;
+      else console.error(error);
     }
     await loadAll();
-    setUploadMsg(`Added ${added} transactions${dupes ? `, skipped ${dupes} duplicates` : ''}.`);
-    if (added > 0) generateInsights();
+    setUploadMsg(`Added ${added} transaction${added !== 1 ? 's' : ''}${dupes ? `, skipped ${dupes} duplicates` : ''}.`);
     setUploading(false);
+  }
+
+  async function handlePromptChoice(cardNameOverride) {
+    if (!uploadPrompt) return;
+    const file = uploadPrompt.file;
+    setUploadPrompt(null);
+    await uploadSingleFile(file, cardNameOverride);
   }
 
   async function applyOverride(tx, newCat) {
@@ -252,7 +268,7 @@ export default function App() {
       </div>
 
       <div className="tabs">
-        {[['dashboard','Overview'],['transactions','Transactions'],['investments','Investments'],['wise','Wise & Travels'],['budgets','Budgets'],['insights','Insights'],['settings','Settings']].map(([id, label]) => (
+        {[['dashboard','Overview'],['transactions','Transactions'],['investments','Investments'],['wise','Wise & Travels'],['insights','Insights'],['settings','Settings']].map(([id, label]) => (
           <button key={id} className={`tab ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{label}</button>
         ))}
       </div>
@@ -427,10 +443,6 @@ export default function App() {
         />
       )}
 
-      {tab === 'budgets' && (
-        <BudgetsTab transactions={txWithCats} />
-      )}
-
       {tab === 'insights' && (
         <div>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 20 }}>
@@ -462,6 +474,28 @@ export default function App() {
             <input type="file" multiple accept=".csv,.xls,.xlsx" onChange={e => handleFiles(Array.from(e.target.files))} />
             {uploading && <p className="hint">Processing…</p>}
             {uploadMsg && <p style={{ color: '#0F6E56', fontSize: 13, marginTop: 8 }}>{uploadMsg}</p>}
+            {uploadPrompt && (
+              <div style={{marginTop:12,padding:'16px',background:'#f5f5f3',borderRadius:10,border:'1px solid #e0e0e0'}}>
+                <p style={{fontSize:13,fontWeight:500,marginBottom:4}}>
+                  {uploadPrompt.source === 'Amex CSV' ? 'Which Amex card is this?' : "We couldn't identify this file — what is it?"}
+                </p>
+                <p style={{fontSize:12,color:'#888',marginBottom:12}}>{uploadPrompt.file.name}</p>
+                {uploadPrompt.source === 'Amex CSV' ? (
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    <button className="btn-primary" onClick={() => handlePromptChoice('Amex Cobalt')}>Amex Cobalt</button>
+                    <button className="btn" onClick={() => handlePromptChoice('Amex Platinum')}>Amex Platinum</button>
+                    <button className="btn" style={{color:'#888'}} onClick={() => setUploadPrompt(null)}>Cancel</button>
+                  </div>
+                ) : (
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    {['Amex Cobalt','Amex Platinum','EQ Bank','CIBC Costco MC','Scene+ Visa','Wealthsimple Credit'].map(card => (
+                      <button key={card} className="btn" onClick={() => handlePromptChoice(card)}>{card}</button>
+                    ))}
+                    <button className="btn" style={{color:'#888'}} onClick={() => setUploadPrompt(null)}>Cancel</button>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="card">
             <div className="card-title">Category rules ({Object.keys(rules).length} saved)</div>
