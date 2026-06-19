@@ -20,9 +20,9 @@ function detectSource(headers, sampleText) {
   const t = sampleText.toUpperCase();
   if (h.includes('transfer date') && h.includes('balance')) return 'EQ Bank';
   if (h.includes('foreign spend amount') || h.includes('exchange rate')) return 'Amex';
+  if (h.includes('date processed') && h.includes('description') && h.includes('amount') && !h.includes('balance')) return 'Amex CSV';
   if (h.includes('filter') && h.includes('type of transaction')) return 'Scene+ Visa';
-  if (h.includes('transaction_type') && h.includes('merchant')) return 'Wealthsimple CC';
-  if ((h.length === 5 && h[0].match(/\d{4}-\d{2}-\d{2}/)) || t.includes('5268')) return 'CIBC Costco';
+  if (h.length === 5 && h[0].match(/\d{4}-\d{2}-\d{2}/) || t.includes('5268')) return 'CIBC Costco';
   return 'Unknown';
 }
 
@@ -63,7 +63,7 @@ async function parseXLS(file) {
       return {
         id: `${cardName}_${r[dateIdx]}_${i}`,
         date: normalizeAmexDate(String(r[dateIdx])),
-        description: String(r[descIdx] || '').trim(),
+        description: String(r[descIdx] || '').trim().replace(/\s{2,}[A-Z][a-zA-Z\s]+$/, '').trim(),
         amount: Math.abs(amt),
         is_credit: amt < 0,
         source: 'Amex',
@@ -159,6 +159,35 @@ async function parseCSVFile(file) {
           card: 'Wealthsimple Credit',
         };
       }).filter(t => t.description && t.amount > 0);
+  }
+
+  if (source === 'Amex CSV') {
+    const dateIdx = headers.findIndex(h => h === 'date');
+    const descIdx = headers.findIndex(h => h === 'description');
+    const amtIdx = headers.findIndex(h => h === 'amount');
+    // Detect card name from file name or content
+    const fname = file.name.toLowerCase();
+    const cardName = fname.includes('cobalt') ? 'Amex Cobalt'
+      : fname.includes('plat') ? 'Amex Platinum'
+      : text.includes('Cobalt') ? 'Amex Cobalt'
+      : text.includes('Platinum') ? 'Amex Platinum'
+      : 'Amex Cobalt'; // default
+    return dataRows.map((r, i) => {
+      const rawDate = r[dateIdx] || '';
+      const rawDesc = (r[descIdx] || '').trim();
+      // Trim trailing city names (extra whitespace before city)
+      const desc = rawDesc.replace(/\s{2,}[A-Z][a-zA-Z\s]+$/, '').trim();
+      const amt = parseAmount(r[amtIdx]);
+      return {
+        id: `${cardName.replace(' ','_')}_${rawDate}_${i}`,
+        date: normalizeAmexDate(rawDate),
+        description: desc,
+        amount: Math.abs(amt),
+        is_credit: amt < 0,
+        source: 'Amex',
+        card: cardName,
+      };
+    }).filter(t => t.description && t.amount > 0);
   }
 
   // Unknown — best guess
