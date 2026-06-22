@@ -62,9 +62,10 @@ function parseActivitiesCSV(text) {
 
 async function getUSDCAD() {
   try {
-    const r = await fetch('https://corsproxy.io/?url='+encodeURIComponent('https://query1.finance.yahoo.com/v8/finance/chart/USDCAD=X?interval=1d&range=1d'));
+    const r = await fetch('/api/prices?tickers=USDCAD%3DX');
+    if (!r.ok) throw new Error('failed');
     const j = await r.json();
-    return j?.chart?.result?.[0]?.meta?.regularMarketPrice || 1.3640;
+    return j['USDCAD=X'] || 1.3640;
   } catch { return 1.3640; }
 }
 
@@ -81,23 +82,17 @@ export default function Investments() {
   const [refreshing, setRefreshing] = useState(false);
   const [priceUpdatedAt, setPriceUpdatedAt] = useState(null);
 
-  useEffect(() => { loadAll(); getUSDCAD().then(r=>setUsdCad(r)); }, []);
-
   async function fetchLivePrices(holdingsData) {
-    // Include all tickers including crypto (BTC-CAD, ETH-CAD work on Yahoo Finance)
-    // Exclude only empty/null symbols
     const tickers = [...new Set(holdingsData.map(h => h.symbol).filter(s => s && s.length > 0))];
-    const prices = {};
-    await Promise.all(tickers.map(async ticker => {
-      try {
-        const url = 'https://query1.finance.yahoo.com/v8/finance/chart/' + ticker + '?interval=1d&range=1d';
-        const r = await fetch('https://corsproxy.io/?url=' + encodeURIComponent(url));
-        const j = await r.json();
-        const price = j?.chart?.result?.[0]?.meta?.regularMarketPrice;
-        if (price) prices[ticker] = price;
-      } catch {}
-    }));
-    return prices;
+    if (!tickers.length) return {};
+    try {
+      const r = await fetch('/api/prices?tickers=' + tickers.join(','));
+      if (!r.ok) throw new Error('prices api failed');
+      return await r.json();
+    } catch(e) {
+      console.error('Price fetch failed:', e);
+      return {};
+    }
   }
 
   async function handleRefresh() {
@@ -110,9 +105,11 @@ export default function Investments() {
       setUsdCad(newRate);
       setLivePrices(newPrices);
       setPriceUpdatedAt(new Date());
-    } catch (e) { console.error(e); }
+    } catch(e) { console.error(e); }
     setRefreshing(false);
   }
+
+  useEffect(() => { loadAll(); getUSDCAD().then(r=>setUsdCad(r)); }, []);
 
   async function loadAll() {
     const [{ data: hData }, { data: aData }] = await Promise.all([
@@ -167,23 +164,15 @@ export default function Investments() {
     setUploading(false);
   }
 
-  // Holdings with CAD conversion — use live price if available, else stored value
+  // Holdings with CAD conversion
   const holdingsCAD = holdings.map(h => {
     const livePrice = livePrices[h.symbol];
     const liveMarketValue = livePrice && h.quantity
       ? livePrice * h.quantity
       : h.market_value;
-    // Only convert to CAD if the holding is genuinely USD-denominated
-    // Crypto (BTC-CAD, ETH-CAD) already returns CAD prices from Yahoo
     const isUSD = h.market_value_currency === 'USD' && !h.symbol?.includes('-CAD');
     const marketValueCAD = isUSD ? liveMarketValue * usdCad : liveMarketValue;
-    return {
-      ...h,
-      marketValueCAD,
-      bookValueCAD: h.book_value_cad,
-      livePrice,
-      liveMarketValue,
-    };
+    return { ...h, marketValueCAD, bookValueCAD: h.book_value_cad, livePrice };
   });
 
   const isCrypto = subTab === 'crypto';
@@ -302,8 +291,8 @@ export default function Investments() {
         </button>
         {uploading&&<span style={s.hint}>Processing…</span>}
         {uploadMsg&&<span style={{fontSize:12,color:'#0F6E56'}}>{uploadMsg}</span>}
-        {lastUpdated&&<span style={s.hint}>Holdings as of {new Date(lastUpdated).toLocaleDateString('en-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>}
         {priceUpdatedAt&&<span style={{...s.hint,color:'#0F6E56'}}>Live prices as of {priceUpdatedAt.toLocaleTimeString('en-CA',{hour:'2-digit',minute:'2-digit'})}</span>}
+        {lastUpdated&&<span style={s.hint}>Holdings as of {new Date(lastUpdated).toLocaleDateString('en-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</span>}
         <span style={s.hint}>USD/CAD: {usdCad.toFixed(4)}</span>
       </div>
 
