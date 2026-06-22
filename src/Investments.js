@@ -33,6 +33,8 @@ function parseHoldingsCSV(text) {
     bookValueMarket: parseAmount(get(r,'book_value__market_')||get(r,'book_value_market')||'0'),
     marketValue: parseAmount(get(r,'market_value')),
     marketValueCurrency: get(r,'market_value_currency'),
+    exchange: get(r,'exchange'),
+    mic: get(r,'mic'),
     unrealizedReturn: parseAmount(get(r,'market_unrealized_returns')),
   })).filter(r=>r.symbol);
 }
@@ -82,13 +84,40 @@ export default function Investments() {
   const [refreshing, setRefreshing] = useState(false);
   const [priceUpdatedAt, setPriceUpdatedAt] = useState(null);
 
+  function buildYahooTicker(symbol, exchange, marketPriceCurrency) {
+    if (!symbol) return null;
+    // Crypto — no suffix, use CAD pair
+    const cryptos = ['BTC','ETH','ADA','DOGE','DOT','SOL','XRP','POL','RENDER','SHIB'];
+    if (cryptos.includes(symbol)) return symbol + '-CAD';
+    // TSX / TSX-V / CBOE Canada — add .TO or .V
+    if (exchange === 'TSX' || exchange === 'CBOE CANADA') return symbol + '.TO';
+    if (exchange === 'TSX-V') return symbol + '.V';
+    // US exchanges — use as-is
+    if (['NYSE','NASDAQ','BATS'].includes(exchange)) return symbol;
+    // Fallback: CAD currency = TSX, USD = US market
+    if (marketPriceCurrency === 'CAD') return symbol + '.TO';
+    return symbol;
+  }
+
   async function fetchLivePrices(holdingsData) {
-    const tickers = [...new Set(holdingsData.map(h => h.symbol).filter(s => s && s.length > 0))];
+    const tickerMap = {}; // yahooTicker -> original symbol
+    holdingsData.forEach(h => {
+      const ticker = buildYahooTicker(h.symbol, h.exchange, h.market_price_currency);
+      if (ticker) tickerMap[ticker] = h.symbol;
+    });
+    const tickers = Object.keys(tickerMap);
     if (!tickers.length) return {};
     try {
       const r = await fetch('/api/prices?tickers=' + tickers.join(','));
       if (!r.ok) throw new Error('prices api failed');
-      return await r.json();
+      const pricesByTicker = await r.json();
+      // Map back to original symbol
+      const pricesBySymbol = {};
+      Object.entries(pricesByTicker).forEach(([ticker, price]) => {
+        const sym = tickerMap[ticker];
+        if (sym) pricesBySymbol[sym] = price;
+      });
+      return pricesBySymbol;
     } catch(e) {
       console.error('Price fetch failed:', e);
       return {};
@@ -135,6 +164,8 @@ export default function Investments() {
         symbol: h.symbol, name: h.name, security_type: h.securityType,
         quantity: h.quantity, market_price: h.marketPrice,
         market_price_currency: h.marketPriceCurrency,
+        exchange: h.exchange || null,
+        mic: h.mic || null,
         book_value_cad: h.bookValueCAD, book_value_market: h.bookValueMarket,
         market_value: h.marketValue, market_value_currency: h.marketValueCurrency,
         unrealized_return: h.unrealizedReturn, uploaded_at: new Date().toISOString(),
@@ -170,7 +201,7 @@ export default function Investments() {
     const liveMarketValue = livePrice && h.quantity
       ? livePrice * h.quantity
       : h.market_value;
-    const isUSD = h.market_value_currency === 'USD' && !h.symbol?.includes('-CAD');
+    const isUSD = h.market_value_currency === 'USD';
     const marketValueCAD = isUSD ? liveMarketValue * usdCad : liveMarketValue;
     return { ...h, marketValueCAD, bookValueCAD: h.book_value_cad, livePrice };
   });
