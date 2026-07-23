@@ -81,18 +81,37 @@ export default function App() {
 
   useEffect(() => { loadAll(); }, []);
 
+  async function fetchAllTransactions() {
+    const pageSize = 1000;
+    let from = 0;
+    let all = [];
+    while (true) {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .order('date', { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) { console.error('transaction fetch error', error); break; }
+      if (!data || data.length === 0) break;
+      all = all.concat(data);
+      if (data.length < pageSize) break;
+      from += pageSize;
+    }
+    return all;
+  }
+
   async function loadAll() {
     setLoading(true);
     try {
       const [
-        { data: txData },
+        txData,
         { data: ruleData },
         { data: holdData },
         { data: insData },
         { data: wiseData },
         { data: tripData },
       ] = await Promise.all([
-        supabase.from('transactions').select('*').order('date', { ascending: false }).range(0, 9999),
+        fetchAllTransactions(),
         supabase.from('category_rules').select('*'),
         supabase.from('holdings').select('*'),
         supabase.from('insights').select('*').order('created_at', { ascending: false }).limit(10),
