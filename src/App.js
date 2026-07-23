@@ -198,19 +198,10 @@ export default function App() {
         .forEach(tx => { merchantSummary[tx.description] = (merchantSummary[tx.description]||0)+Number(tx.amount); });
       const top5 = Object.entries(merchantSummary).sort((a,b)=>b[1]-a[1]).slice(0,5);
       const prompt = `You are a personal finance analyst for a young professional in Toronto. Here is their spending data:\n\nCategory totals (CAD): ${JSON.stringify(catSummary)}\nMonthly totals: ${JSON.stringify(monthSummary)}\nTop merchants: ${JSON.stringify(top5)}\n\nGenerate 5 concise, specific, actionable insights. Be direct and specific to this data. Return ONLY a JSON array with objects containing: "type" (pattern, anomaly, suggestion, or positive) and "text" (one to two sentences). No markdown, no preamble.`;
-      const resp = await fetch('https://corsproxy.io/?url=' + encodeURIComponent('https://api.anthropic.com/v1/messages'), {
+      const resp = await fetch('/api/insights', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.REACT_APP_ANTHROPIC_KEY,
-          'anthropic-version': '2023-06-01',
-          'anthropic-dangerous-direct-browser-access': 'true',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 1000,
-          messages: [{ role: 'user', content: prompt }],
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
       });
       const data = await resp.json();
       const raw = data.content?.[0]?.text || '[]';
